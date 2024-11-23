@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 788e87a22787c7e43a5558c46e187285
+timeCreated: 1497932017
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 96659
+  packageName: Cola Can
+  packageVersion: 1.0
+  assetPath: Assets/Models/Cola Can/Model/Materials/cola_can.mat
+  uploadId: 195174
