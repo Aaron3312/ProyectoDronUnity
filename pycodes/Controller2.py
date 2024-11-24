@@ -4,9 +4,16 @@ from flask_cors import CORS
 from datetime import datetime
 import logging
 import math
+import socket
+import json
+import threading
+import time
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -14,21 +21,77 @@ CORS(app)
 
 class RobotAgent(ap.Agent):
     def setup(self):
-        self.id = None
-        self.has_cube = False
-        self.target_cube_id = None
-        self.delivery_zone = {'x': 30, 'y': 0, 'z': 0}
-        self.cubes_delivered = 0
+        self.id = 0
         self.start_time = datetime.now()
         self.total_distance_traveled = 0
         self.last_position = None
-        self.is_delivering = False
         self.last_movement_time = None
-        self.MIN_MOVEMENT_THRESHOLD = 1  # Threshold for meaningful movement
-        self.last_cube_count = 0  # For rate calculation
-        self.current_action = None  # Nuevo: para mantener la acción actual
-        self.target_position = None  # Nuevo: para mantener el objetivo actual
+        self.MIN_MOVEMENT_THRESHOLD = 1
+        self.current_action = None
+        self.target_position = None
+        self._investigating = False
+        self._investigation_complete = False
+        self._detected_person = None
+        self._last_detection_time = None
+        self.detection_cooldown = 5.0
+        self.camera_positions = [
+            {'x': -2.833347, 'y': 8.0, 'z': 44.74295},
+            {'x': -61.0, 'y': 10.0, 'z': 67.0},
+            {'x': 52.0, 'y': 4.0, 'z': -35.0},
+            {'x': 28.24, 'y': 4.0, 'z': -104.0}
+        ]
+        logger.debug(f"Drone initialized with id: {self.id}")
 
+    @property
+    def investigating(self):
+        return self._investigating
+
+    @investigating.setter
+    def investigating(self, value):
+        self._investigating = value
+        logger.debug(f"Setting investigating to: {value}")
+
+    def handle_person_detection(self, detection_data):
+        current_time = time.time()
+        
+        # Log current state for debugging
+        logger.debug(f"Current state before processing detection:")
+        logger.debug(f"investigating: {self.investigating}")
+        logger.debug(f"last_detection_time: {self._last_detection_time}")
+        logger.debug(f"detected_person: {self._detected_person}")
+        
+        # Check cooldown period
+        if self._last_detection_time:
+            time_since_last = current_time - self._last_detection_time
+            logger.debug(f"Time since last detection: {time_since_last:.2f} seconds")
+            if time_since_last < self.detection_cooldown:
+                logger.debug(f"In cooldown period ({time_since_last:.2f} < {self.detection_cooldown})")
+                return
+        
+        # Check if we're already investigating
+        if self.investigating:
+            if not self._investigation_complete:
+                logger.debug("Currently investigating, cannot start new investigation")
+                return
+            else:
+                logger.debug("Previous investigation complete, can start new one")
+        
+        # Process new detection
+        camera_id = detection_data['camera_id']
+        logger.info(f"Starting new investigation for camera {camera_id}")
+        
+        self._detected_person = {
+            'camera_id': camera_id,
+            'position': self.camera_positions[camera_id],
+            'detection_time': current_time
+        }
+        self._investigating = True
+        self._investigation_complete = False
+        self._last_detection_time = current_time
+        
+        logger.debug("Detection processed - New state:")
+        logger.debug(f"investigating: {self._investigating}")
+        logger.debug(f"detected_person: {self._detected_person}")
 
     def calculate_distance(self, pos1, pos2):
         distance = math.sqrt(
@@ -36,165 +99,139 @@ class RobotAgent(ap.Agent):
             (pos1['y'] - pos2['y'])**2 +
             (pos1['z'] - pos2['z'])**2
         )
-        return distance if distance >= self.MIN_MOVEMENT_THRESHOLD else 0
+        calculated_distance = distance if distance >= self.MIN_MOVEMENT_THRESHOLD else 0
+        return calculated_distance
+
+
+    def step(self, current_state):
+        position = current_state['position']
+        current_time = current_state.get('time', time.time())
+        self.update_metrics(position, current_time)
+
+        logger.debug(f"Step - Current state:")
+        logger.debug(f"Position: {position}")
+        logger.debug(f"Investigating: {self._investigating}")
+        logger.debug(f"Investigation complete: {self._investigation_complete}")
+        logger.debug(f"Detected person: {self._detected_person}")
+        
+        if self._investigating and self._detected_person:
+            if self.check_investigation_complete(position):
+                logger.info("Investigation complete, resuming exploration")
+                return {"decision": "explore"}
+            
+            camera_pos = self._detected_person['position']
+            logger.debug(f"Moving to investigation target: {camera_pos}")
+            return {
+                "decision": "move_to_target",
+                "target": camera_pos
+            }
+        
+        return {"decision": "explore"}
+
+    def check_investigation_complete(self, current_position):
+        if not self._detected_person:
+            return False
+            
+        target_pos = self._detected_person['position']
+        distance = self.calculate_distance(current_position, target_pos)
+        
+        logger.debug(f"Checking investigation completion - Distance to target: {distance:.2f}")
+        
+        if distance < 2.0:
+            logger.info(f"Investigation complete - Distance to target: {distance:.2f}")
+            self._investigating = False
+            self._investigation_complete = True
+            self._detected_person = None
+            return True
+            
+        return False
 
     def update_metrics(self, current_position, current_time):
-        if self.start_time is None:
-            self.start_time = current_time
-
         if self.last_position and self.last_movement_time:
             if isinstance(current_time, datetime):
                 time_diff = (current_time - self.last_movement_time).total_seconds()
-            else:  # Assume float (timestamp)
+            else:
                 time_diff = current_time - self.last_movement_time
-
-            if time_diff >= 0.1:  # At least 100ms between updates
+            
+            if time_diff >= 0.1:
                 distance = self.calculate_distance(current_position, self.last_position)
                 if distance > 0:
                     self.total_distance_traveled += distance
-                    logger.debug(f"Agent {self.id} traveled {distance} units.")
                 self.last_movement_time = current_time
         else:
             self.last_movement_time = current_time
 
         self.last_position = current_position.copy()
 
-    def get_utility_metrics(self, current_time):
-        if self.start_time is None:
-            self.start_time = current_time
-
-        if isinstance(current_time, datetime):
-            elapsed_time = (current_time - self.start_time).total_seconds()
-            logger.debug(f"Elapsed time: {elapsed_time}, current_time: {current_time}, start_time: {self.start_time}")
-        else:  # Assume float (timestamp)
-            startTime = self.start_time.timestamp() if isinstance(self.start_time, datetime) else self.start_time
-
-
-            elapsed_time = current_time - startTime
-            logger.debug(f"float Elapsed time: {elapsed_time}, current_time: {current_time}, start_time: {self.start_time}")
-
-
-        minutes_elapsed = elapsed_time / 60
-        rate = (self.cubes_delivered) / (minutes_elapsed or 1)
-        self.last_cube_count = self.cubes_delivered
-        logger.debug(f"Agent {self.id} metrics: {self.cubes_delivered} cubes delivered in {minutes_elapsed} minutes. Rate: {rate}, cubecount: {self.last_cube_count}")
-
-        return {
-            'agent_id': self.id,
-            'cubes_delivered': self.cubes_delivered,
-            'total_distance': round(self.total_distance_traveled, 2),
-            'efficiency_ratio': round(self.cubes_delivered / max(1, self.total_distance_traveled) * 10000, 2),
-            'delivery_rate': round(rate, 2),
-            'elapsed_minutes': round(minutes_elapsed, 2),
-        }
-
-    def find_nearest_cube(self, position, available_cubes):
-        if not available_cubes:
-            return None
-
-        nearest_cube = None
-        min_distance = float('inf')
-
-        for cube in available_cubes:
-            if hasattr(cube, 'targeted_by') and cube.get('targeted_by') != self.id:
-                continue
-
-            distance = self.calculate_distance(position, cube['position'])
-            if distance < min_distance:
-                min_distance = distance
-                nearest_cube = cube
-
-        if nearest_cube:
-            nearest_cube['targeted_by'] = self.id
-            self.target_cube_id = nearest_cube['id']
-            logger.debug(f"Agent {self.id} targeting cube {nearest_cube['id']} at distance {min_distance}")
-        else:
-            logger.debug(f"Agent {self.id} found no available cubes")
-
-        return nearest_cube
-
-    def step(self, current_state):
-        position = current_state['position']
-        has_cube = current_state['has_cube']
-        available_cubes = current_state['available_cubes']
-        current_time = current_state.get('time', 0)
-
-        self.update_metrics(position, current_time)
-
-        if has_cube != self.has_cube:
-            self.has_cube = has_cube
-            if not has_cube and self.is_delivering:
-                self.cubes_delivered += 1
-                logger.debug(f"Agent {self.id} completed delivery. Total deliveries: {self.cubes_delivered}")
-                self.is_delivering = False
-                self.current_action = None  # Reset current action
-                self.target_position = None  # Reset target position
-            
-        # Si ya tenemos una acción en curso y las condiciones no han cambiado, mantenerla
-        if self.current_action and self.target_position:
-            if self.current_action == "get_cube":
-                # Verificar si el cubo objetivo aún está disponible
-                target_still_available = any(cube['id'] == self.target_cube_id for cube in available_cubes)
-                if target_still_available and not has_cube:
-                    return {"decision": self.current_action, "target_cube": self.find_cube_by_id(available_cubes, self.target_cube_id)}
-            elif self.current_action == "deliver_cube" and has_cube:
-                distance_to_delivery = self.calculate_distance(position, self.delivery_zone)
-                if distance_to_delivery > 2:
-                    return {"decision": "deliver_cube", "target_position": self.delivery_zone}
-                else:
-                    return {"decision": "put_cube", "target": "delivery_zone"}
-
-        # Si no hay acción en curso o las condiciones cambiaron, decidir nueva acción
-        self.current_action = None
-        self.target_position = None
-
-        if has_cube or (self.target_cube_id is not None and not any(cube['id'] == self.target_cube_id for cube in available_cubes)):
-            self.target_cube_id = None
-
-        if not has_cube and available_cubes:
-            target_cube = self.find_nearest_cube(position, available_cubes)
-            if target_cube:
-                self.current_action = "get_cube"
-                self.target_position = target_cube['position']
-                return {"decision": "get_cube", "target_cube": target_cube}
-        elif has_cube:
-            distance_to_delivery = self.calculate_distance(position, self.delivery_zone)
-            if distance_to_delivery > 2:
-                self.current_action = "deliver_cube"
-                self.target_position = self.delivery_zone
-                self.is_delivering = True
-                return {"decision": "deliver_cube", "target_position": self.delivery_zone}
-            else:
-                return {"decision": "put_cube", "target": "delivery_zone"}
-
-        return {"decision": "explore"}
-
-    def find_cube_by_id(self, available_cubes, cube_id):
-        for cube in available_cubes:
-            if cube['id'] == cube_id:
-                return cube
-        return None
-
 
 class RobotWorld(ap.Model):
     def setup(self):
         self.agents = ap.AgentList(self, self.p.num_robots, RobotAgent)
+        self.detection_thread = None
+        self.detection_socket = None
+        self.running = True
+        self._setup_detection_socket()
         logger.info(f"Created model with {self.p.num_robots} agents")
 
+    def _setup_detection_socket(self):
+        try:
+            if self.detection_socket:
+                self.detection_socket.close()
+            
+            self.detection_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Permitir la reutilización del socket
+            self.detection_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            
+            # Intentar vincular el socket varias veces
+            max_attempts = 5
+            attempt = 0
+            while attempt < max_attempts:
+                try:
+                    self.detection_socket.bind(('0.0.0.0', 5556))
+                    logger.info("Successfully bound detection socket")
+                    break
+                except OSError as e:
+                    attempt += 1
+                    if attempt == max_attempts:
+                        raise e
+                    logger.warning(f"Socket binding attempt {attempt} failed, retrying...")
+                    time.sleep(1)
+            
+            if not self.detection_thread or not self.detection_thread.is_alive():
+                self.detection_thread = threading.Thread(target=self._listen_for_detections)
+                self.detection_thread.daemon = True
+                self.detection_thread.start()
+                
+        except Exception as e:
+            logger.error(f"Error setting up detection socket: {e}")
+            raise
+
+    def _listen_for_detections(self):
+        logger.info("Starting detection listener thread")
+        while self.running:
+            try:
+                data, _ = self.detection_socket.recvfrom(65536)
+                detection = json.loads(data.decode())
+                # logger.info(f"Received detection: {detection}")
+                for agent in self.agents:
+                    agent.handle_person_detection(detection)
+            except Exception as e:
+                if self.running:  # Solo logear errores si aún estamos ejecutando
+                    logger.error(f"Error processing detection: {e}")
+                    time.sleep(0.1)
+
     def get_decisions(self, world_state):
+        logger.debug(f"Getting decisions for world state: {world_state}")
         decisions = []
         agent_states = {entry['id']: entry['state'] for entry in world_state['agentStates']}
-        while len(self.agents) < len(agent_states):
-            new_agent = RobotAgent(self)
-            self.agents.append(new_agent)
-
-        for i, agent_id in enumerate(agent_states.keys()):
-            self.agents[i].id = int(agent_id)
-
+        
         for agent in self.agents:
             if str(agent.id) in agent_states:
                 agent_state = agent_states[str(agent.id)]
-                decisions.append(agent.step(agent_state))
+                decision = agent.step(agent_state)
+                decisions.append(decision)
+                logger.debug(f"Decision for agent {agent.id}: {decision}")
+        
         return decisions
 
     def get_metrics(self, world_state):
@@ -204,12 +241,20 @@ class RobotWorld(ap.Model):
             if str(agent.id) in agent_states:
                 agent_state = agent_states[str(agent.id)]
                 agent.update_metrics(agent_state['position'], agent_state.get('time', 0))
-                metrics.append(agent.get_utility_metrics(agent_state.get('time', 0)))
-        logger.debug(f"Metrics: {metrics}")
+                metrics.append({
+                    'agent_id': agent.id,
+                    'total_distance': round(agent.total_distance_traveled, 2)
+                })
         return metrics
 
+    def cleanup(self):
+        self.running = False
+        if self.detection_socket:
+            try:
+                self.detection_socket.close()
+            except:
+                pass
 
-# Flask App and Endpoints
 model = RobotWorld({'num_robots': 1})
 model.sim_setup()
 
@@ -234,4 +279,8 @@ def get_metrics():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    try:
+        logger.info("Starting Flask application")
+        app.run(debug=True)
+    finally:
+        model.cleanup()

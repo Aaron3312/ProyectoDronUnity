@@ -1,7 +1,7 @@
 // SecurityCameraManager.cs
 using UnityEngine;
 using System.Collections.Generic;
-
+//this is for controlling the security cameras in the simulation its called SecurityCameraManager
 public class SecurityCameraManager : MonoBehaviour
 {
     [SerializeField] private GameObject cameraPrefab;

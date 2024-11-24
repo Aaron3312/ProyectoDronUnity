@@ -6,31 +6,25 @@ using System.Collections.Generic;
 public class RobotAgent : MonoBehaviour
 {
     public int id;
-    public bool hasCube;
     public float stoppingDistance = 1.5f;
     public float hoverHeight = 3f;  // Altura de vuelo sobre el suelo
-    
-        // Nuevas variables para el despegue
     public bool hasInitializedTakeoff = false;
     private float takeoffDuration = 4f;
     private float spinSpeed = 360f;
     private float initialHeight = -0.7f;
     private float takeoffHeight = 2.5f; // Altura máxima durante el despegue
     private Vector3 originalScale;
-
-    private GameObject carriedCube;
-    private GameObject targetedCube;
     private bool isMoving = false;
     private static Dictionary<int, int> cubeTargets = new Dictionary<int, int>();
     private static object lockObject = new object();
     private Rigidbody rb;
-    
-    // NavMesh components
     private NavMeshAgent navAgent;
     private Transform attachmentPoint;
     private bool isExploring = false;
     private float explorationTimer = 0f;
-    private float explorationDuration = 10f; // Duración de cada exploración en segundos
+    private float explorationDuration = 1f; // Duración de cada exploración en segundos
+    private bool isWaiting = false;
+    private bool isViewingHuman = false;
 
     private static readonly Vector3[] explorationPoints = new Vector3[]
     {
@@ -46,6 +40,7 @@ public class RobotAgent : MonoBehaviour
     };
     
     private int currentExplorationIndex = 0;
+
 
     void Start()
     {
@@ -73,22 +68,18 @@ public class RobotAgent : MonoBehaviour
             rb.useGravity = false;  // Disable gravity since we're flying
             rb.constraints = RigidbodyConstraints.FreezeRotation;
         }
-                // Iniciar secuencia de despegue
+        
+        // Iniciar secuencia de despegue
         transform.position = new Vector3(transform.position.x, initialHeight, transform.position.z);
         StartCoroutine(PerformDramaticTakeoff());
     }
 
-    
-
     void Update()
     {
-
         if (hasInitializedTakeoff == false)
         {
             return;
         }
-
-
 
         if (navAgent != null)
         {
@@ -103,7 +94,8 @@ public class RobotAgent : MonoBehaviour
                 currentPos.y = Mathf.Lerp(currentPos.y, targetHeight, Time.deltaTime * 5f);
                 transform.position = currentPos;
             }
-                        // Actualizar timer de exploración
+
+            // Actualizar timer de exploración
             if (isExploring)
             {
                 explorationTimer += Time.deltaTime;
@@ -113,43 +105,59 @@ public class RobotAgent : MonoBehaviour
                     explorationTimer = 0f;
                 }
             }
-        
         }
     }
 
-    public void MoveToCube(GameObject cube)
-    {
-        if (!hasCube && cube != null)
-        {
-            var cubeController = cube.GetComponent<CubeController>();
-            if (cubeController != null && TryClaimCube(cubeController.cubeId))
-            {
-                targetedCube = cube;
-                StopAllCoroutines();
-                StartCoroutine(MoveToTarget(cube.transform.position));
-                Debug.Log($"Drone {id} moving to pick up cube {cubeController.cubeId}");
-            }
-            else
-            {
-                Explore();
-            }
-        }
-    }
-
-    public void MoveToDeliveryZone(Vector3 deliveryZone)
-    {
-        if (hasCube)
-        {
-            StopAllCoroutines();
-            Vector3 dropoffPoint = GetRandomPointAroundPosition(deliveryZone, 2f);
-            StartCoroutine(MoveToTarget(dropoffPoint));
-            Debug.Log($"Drone {id} moving to delivery zone with cube");
-        }
-    }
-
-    public void Explore()
+    public void MoveToTargetHuman(Vector3 target)
     {
         if (hasInitializedTakeoff == false)
+        {
+            return;
+        }
+
+        isWaiting = false;
+        isExploring = false;
+        isViewingHuman = true;
+
+        StopAllCoroutines();
+        
+        // Detener inmediatamente el NavMeshAgent
+        if (navAgent != null)
+        {
+            navAgent.isStopped = true;
+            navAgent.ResetPath();
+            navAgent.velocity = Vector3.zero;
+        }
+
+        // Detener cualquier movimiento del Rigidbody
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+        isViewingHuman = false;
+
+        Debug.Log("Drone stopped immediately - human detected");
+    }
+
+    public void Wait()
+    {
+        if (hasInitializedTakeoff == false)
+        {
+            return;
+        }
+
+        isWaiting = true;
+        StopAllCoroutines();
+        
+        // Optional: Make the drone hover in place or perform a subtle hovering animation
+        StartCoroutine(HoverInPlace());
+    }
+    public void Explore()
+    {
+        //add a log to debug
+        Debug.Log($"Drone {id} is exploring");
+        if (hasInitializedTakeoff == false || isWaiting || isViewingHuman)
         {
             return;
         }
@@ -158,14 +166,25 @@ public class RobotAgent : MonoBehaviour
         {
             return;
         }
+        
         Vector3 randomPoint = GetRandomExplorationPoint();
         StopAllCoroutines();
-        StartCoroutine(MoveToTarget(randomPoint));
+        StartCoroutine(MoveToTargetCoroutine(randomPoint));
 
         // Iniciar nueva exploración
         isExploring = true;
         explorationTimer = 0f;
     }
+
+    IEnumerator HoverInPlace()
+    {
+        while (isWaiting)
+        {
+            transform.position += Vector3.up * Mathf.Sin(Time.time * 2f) * 0.02f;
+            yield return null;
+        }
+    }
+
     private Vector3 GetRandomExplorationPoint()
     {
         // Get a random point from our predefined array
@@ -179,36 +198,6 @@ public class RobotAgent : MonoBehaviour
         
         // If no valid position found, return the original point with hover height
         return new Vector3(point.x, point.y + hoverHeight, point.z);
-    }
-
-
-    Vector3 GetRandomNavMeshPosition()
-    {
-        Vector3 randomPos = new Vector3(
-            Random.Range(-55f, 82f),
-            hoverHeight,
-            Random.Range(48f, -100f)
-        );
-
-        if (NavMesh.SamplePosition(randomPos, out NavMeshHit hit, 20f, NavMesh.AllAreas))
-        {
-            return new Vector3(hit.position.x, hit.position.y + hoverHeight, hit.position.z);
-        }
-
-        return transform.position;
-    }
-
-    Vector3 GetRandomPointAroundPosition(Vector3 center, float radius)
-    {
-        Vector3 randomPos = center + Random.insideUnitSphere * radius;
-        randomPos.y = center.y + hoverHeight;
-
-        if (NavMesh.SamplePosition(randomPos, out NavMeshHit hit, radius, NavMesh.AllAreas))
-        {
-            return new Vector3(hit.position.x, hit.position.y + hoverHeight, hit.position.z);
-        }
-
-        return new Vector3(center.x, center.y + hoverHeight, center.z);
     }
 
     IEnumerator PerformDramaticTakeoff()
@@ -273,12 +262,28 @@ public class RobotAgent : MonoBehaviour
         hasInitializedTakeoff = true;
         
         Debug.Log($"Drone {id} ha completado su secuencia de despegue");
-        Explore();
     }
-    IEnumerator MoveToTarget(Vector3 target)
+
+    public void MoveToTarget(Vector3 target)
+    {
+        if (hasInitializedTakeoff == false)
+        {
+            return;
+        }
+
+        isWaiting = false; // Clear waiting state when moving to target
+
+
+        StopAllCoroutines();
+        StartCoroutine(MoveToTargetCoroutine(target));
+    }
+
+    IEnumerator MoveToTargetCoroutine(Vector3 target)
     {
         if (navAgent != null)
         {
+            Debug.Log($"Drone {id} moving to target: {target}");
+            
             // Adjust target position to hover height
             Vector3 targetWithHeight = new Vector3(target.x, target.y + hoverHeight, target.z);
             navAgent.SetDestination(targetWithHeight);
@@ -300,145 +305,11 @@ public class RobotAgent : MonoBehaviour
                 yield return null;
             }
 
-            // Handle arrival at destination
-            if (!hasCube && targetedCube != null)
-            {
-                if (Vector3.Distance(transform.position, targetedCube.transform.position) < stoppingDistance * 1.2f)
-                {
-                    yield return StartCoroutine(PickupCube(targetedCube));
-                }
-                else
-                {
-                    var cubeController = targetedCube.GetComponent<CubeController>();
-                    if (cubeController != null)
-                    {
-                        ReleaseCube(cubeController.cubeId);
-                    }
-                    targetedCube = null;
-                }
-            }
-            else if (transform.position.x > 10)
-            {
-                yield return StartCoroutine(DropCube());
-            }
+            Debug.Log($"Drone {id} reached target position");
+
+            // Una vez que llegamos al objetivo, podemos reiniciar la exploración
+            isExploring = false;
+            explorationTimer = 0f;
         }
-    }
-
-    IEnumerator PickupCube(GameObject cube)
-    {
-        var cubeController = cube.GetComponent<CubeController>();
-        if (cubeController == null || cubeController.isCarried || attachmentPoint == null)
-        {
-            Debug.Log("Cannot pick up cube: controller is null, cube is carried, or attachment point not found");
-            yield break;
-        }
-
-        var rigidbody = cube.GetComponent<Rigidbody>();
-        if (rigidbody != null)
-        {
-            rigidbody.isKinematic = true;
-        }
-
-        cube.transform.SetParent(attachmentPoint);
-        cube.transform.localPosition = Vector3.zero;
-        cube.transform.localRotation = Quaternion.identity;
-        
-        carriedCube = cube;
-        cubeController.isCarried = true;
-        hasCube = true;
-        targetedCube = null;
-        
-        Debug.Log($"Drone {id} picked up cube {cubeController.cubeId}");
-    }
-
-    IEnumerator DropCube()
-    {
-        if (carriedCube == null) yield break;
-
-        var cubeController = carriedCube.GetComponent<CubeController>();
-        if (cubeController == null) yield break;
-
-        carriedCube.transform.SetParent(null);
-
-        var rigidbody = carriedCube.GetComponent<Rigidbody>();
-        if (rigidbody != null)
-        {
-            rigidbody.isKinematic = false;
-        }
-
-        Vector3 dropPosition = new Vector3(transform.position.x, 0.1f, transform.position.z);
-        carriedCube.transform.position = dropPosition;
-
-        cubeController.isCarried = false;
-        ReleaseCube(cubeController.cubeId);
-        Debug.Log($"Drone {id} dropped cube {cubeController.cubeId}");
-        carriedCube = null;
-        hasCube = false;
-    }
-
-    private bool TryClaimCube(int cubeId)
-    {
-        lock (lockObject)
-        {
-            if (cubeTargets.TryGetValue(cubeId, out int targetingAgent))
-            {
-                if (targetingAgent == id)
-                    return true;
-                return false;
-            }
-
-            cubeTargets[cubeId] = id;
-            Debug.Log($"Drone {id} claimed cube {cubeId}");
-            return true;
-        }
-    }
-
-    private void ReleaseCube(int cubeId)
-    {
-        lock (lockObject)
-        {
-            if (cubeTargets.ContainsKey(cubeId) && cubeTargets[cubeId] == id)
-            {
-                cubeTargets.Remove(cubeId);
-                Debug.Log($"Drone {id} released cube {cubeId}");
-            }
-        }
-    }
-
-    public void PutCube()
-    {
-        if (hasCube)
-        {
-            StopAllCoroutines();
-            StartCoroutine(DropCube());
-        }
-    }
-
-    GameObject FindNearestCube()
-    {
-        GameObject nearest = null;
-        float minDistance = float.MaxValue;
-
-        foreach (GameObject cube in GameObject.FindGameObjectsWithTag("Cube"))
-        {
-            var cubeController = cube.GetComponent<CubeController>();
-            if (cubeController == null) continue;
-
-            if (cubeController.isCarried || 
-                cubeController.isInPlaneB ||
-                (cubeTargets.ContainsKey(cubeController.cubeId) && cubeTargets[cubeController.cubeId] != id))
-            {
-                continue;
-            }
-
-            float distance = Vector3.Distance(transform.position, cube.transform.position);
-            if (distance < minDistance)
-            {
-                minDistance = distance;
-                nearest = cube;
-            }
-        }
-
-        return nearest;
     }
 }

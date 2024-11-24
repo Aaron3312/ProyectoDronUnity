@@ -4,7 +4,8 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Collections;
 using System.Collections.Concurrent;
-
+//this is for sending out the image from the dron to the python script its called CameraAgents
+//this code is in folder Codes in the Assets
 public class AgentVisionController : MonoBehaviour
 {
     [SerializeField] private int captureWidth = 640;
@@ -46,7 +47,7 @@ public class AgentVisionController : MonoBehaviour
         GameObject cameraObj = new GameObject($"AgentCamera_{agentId}");
         cameraObj.transform.SetParent(transform);
         cameraObj.transform.localPosition = new Vector3(0, 0f, 0.0737f);
-        cameraObj.transform.localRotation = Quaternion.Euler(20, 0, 0);
+        cameraObj.transform.localRotation = Quaternion.Euler(10, 0, 0);
 
         agentCamera = cameraObj.AddComponent<Camera>();
         agentCamera.fieldOfView = 60;
@@ -57,7 +58,7 @@ public class AgentVisionController : MonoBehaviour
         screenShot = new Texture2D(captureWidth, captureHeight, TextureFormat.RGB24, false);
         agentCamera.targetTexture = renderTexture;
         
-        Debug.Log($"Camera initialized for Agent {agentId}"); // Debug log
+        Debug.Log($"Camera initialized for Drone {agentId}"); // Debug log
     }
 
     void InitializeStreaming()
@@ -67,11 +68,11 @@ public class AgentVisionController : MonoBehaviour
             udpClient = new UdpClient();
             streamThread = new Thread(StreamFrames);
             streamThread.Start();
-            Debug.Log($"Agent {agentId}: Started UDP streaming on port {streamPort + agentId}"); // Debug log
+            Debug.Log($"Drone {agentId}: Started UDP streaming on port {streamPort + agentId}"); // Debug log
         }
         catch (Exception e)
         {
-            Debug.LogError($"Agent {agentId}: Failed to initialize streaming: {e.Message}");
+            Debug.LogError($"Drone {agentId}: Failed to initialize streaming: {e.Message}");
         }
     }
 
@@ -99,9 +100,9 @@ public class AgentVisionController : MonoBehaviour
                 frameQueue.Enqueue(packetData);
                 
                 frameCount++;
-                if (frameCount % 100 == 0) // Log cada 100 frames
+                if (frameCount % 10000 == 0) // Log cada 10000 frames
                 {
-                    Debug.Log($"Agent {agentId}: Captured frame {frameCount}");
+                    Debug.Log($"Drone {agentId}: Captured frame {frameCount}");
                 }
             }
 
@@ -120,9 +121,9 @@ public class AgentVisionController : MonoBehaviour
                 {
                     udpClient.Send(frameData, frameData.Length, "127.0.0.1", streamPort + agentId);
                     sentCount++;
-                    if (sentCount % 100 == 0) // Log cada 100 frames enviados
+                    if (sentCount % 10000 == 0) // Log cada 10000 frames enviados
                     {
-                        Debug.Log($"Agent {agentId}: Sent frame {sentCount} to port {streamPort + agentId}");
+                        Debug.Log($"Drone {agentId}: Sent frame {sentCount} to port {streamPort + agentId}");
                     }
                 }
                 else
@@ -132,7 +133,7 @@ public class AgentVisionController : MonoBehaviour
             }
             catch (Exception e)
             {
-                Debug.LogError($"Agent {agentId} streaming error: {e.Message}");
+                Debug.LogError($"Drone {agentId} streaming error: {e.Message}");
                 Thread.Sleep(1000);
             }
         }

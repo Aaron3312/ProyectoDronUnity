@@ -6,7 +6,6 @@ import random
 app = Flask(__name__)
 
 class RobotAgent(ap.Agent):
-    """A robot agent that can pick up and transport cubes"""
     
     def setup(self):
         self.position = [0, 0, 0]  # x, y, z coordinates
