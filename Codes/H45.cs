@@ -26,6 +26,7 @@ public class RobotAgent : MonoBehaviour
     private bool isWaiting = false;
     private bool isViewingHuman = false;
 
+    private Animator animator;
     private static readonly Vector3[] explorationPoints = new Vector3[]
     {
         new Vector3(-7.384952f, 0f, -15.99f),
@@ -45,6 +46,7 @@ public class RobotAgent : MonoBehaviour
     void Start()
     {
         // Get required components
+        animator = GetComponent<Animator>();
         navAgent = GetComponent<NavMeshAgent>();
         rb = GetComponent<Rigidbody>();
         attachmentPoint = transform.Find("AttachmentPoint");
@@ -71,7 +73,6 @@ public class RobotAgent : MonoBehaviour
         
         // Iniciar secuencia de despegue
         transform.position = new Vector3(transform.position.x, initialHeight, transform.position.z);
-        StartCoroutine(PerformDramaticTakeoff());
     }
 
     void Update()
@@ -106,6 +107,26 @@ public class RobotAgent : MonoBehaviour
                 }
             }
         }
+    }
+
+    public void Land()
+    {
+        if (hasInitializedTakeoff == false)
+        {
+            return;
+        }
+
+        // Detener cualquier acción actual
+        StopAllCoroutines();
+        isWaiting = false;
+        isExploring = false;
+        isViewingHuman = false;
+        
+        // Posición inicial de despegue/aterrizaje
+        Vector3 landingPosition = new Vector3(0.67f, initialHeight, -6.16f);
+        
+        // Primero moverse a la posición de aterrizaje
+        StartCoroutine(PerformDramaticLanding(landingPosition));
     }
 
     public void MoveToTargetHuman(Vector3 target)
@@ -153,6 +174,16 @@ public class RobotAgent : MonoBehaviour
         // Optional: Make the drone hover in place or perform a subtle hovering animation
         StartCoroutine(HoverInPlace());
     }
+    public void Takeoff()
+    {
+        Debug.Log($"Drone {id} is taking off");
+        isWaiting = false;
+        StopAllCoroutines();
+        // Iniciar secuencia de despegue
+
+        
+        StartCoroutine(PerformDramaticTakeoff());
+    }
     public void Explore()
     {
         //add a log to debug
@@ -175,6 +206,150 @@ public class RobotAgent : MonoBehaviour
         isExploring = true;
         explorationTimer = 0f;
     }
+
+IEnumerator PerformDramaticLanding(Vector3 landingPosition)
+{
+    Debug.Log($"Drone {id} iniciando secuencia de aterrizaje");
+    
+    // Asegurarnos de que el drone esté en estado de aterrizaje
+    isWaiting = false;
+    isExploring = false;
+    isViewingHuman = false;
+    
+    // First move the drone to the landing position while maintaining height
+    Vector3 approachPosition = new Vector3(landingPosition.x, transform.position.y, landingPosition.z);
+    
+    if (navAgent != null)
+    {
+        // Enable NavMeshAgent if it's disabled
+        if (!navAgent.enabled)
+        {
+            navAgent.enabled = true;
+            yield return null; // Wait a frame to ensure NavMeshAgent is properly initialized
+        }
+
+        bool pathFound = false;
+        float pathFindingTimeout = 2f;
+        float elapsedPathFindingTime = 0f;
+
+        // Set destination and check for valid path
+        if (navAgent.isOnNavMesh)
+        {
+            navAgent.SetDestination(approachPosition);
+            
+            // Wait for path calculation with timeout
+            while (navAgent.pathStatus == NavMeshPathStatus.PathInvalid && 
+                   elapsedPathFindingTime < pathFindingTimeout)
+            {
+                elapsedPathFindingTime += Time.deltaTime;
+                yield return null;
+            }
+
+            pathFound = navAgent.pathStatus != NavMeshPathStatus.PathInvalid;
+        }
+
+        if (!pathFound)
+        {
+            Debug.LogWarning($"Drone {id} couldn't find valid path to landing position. Proceeding with direct landing.");
+        }
+        else
+        {
+            // Wait until we're close enough to the approach position
+            while (Vector3.Distance(transform.position, approachPosition) > stoppingDistance)
+            {
+                yield return null;
+            }
+        }
+
+        // Disable NavMeshAgent before vertical landing sequence
+        navAgent.enabled = false;
+    }
+
+    // Begin dramatic landing sequence
+    float landingDuration = 3f; // Reducido de 5f a 3f para que sea más rápido
+    float elapsedTime = 0f;
+    Vector3 startPos = transform.position;
+    Vector3 finalPos = new Vector3(landingPosition.x, initialHeight, landingPosition.z);
+    Quaternion startRotation = transform.rotation;
+    Quaternion targetRotation = Quaternion.identity;
+    
+    // Phase 1: Hover and pre-landing effects (reducido el tiempo)
+    float preLandingTime = 0.75f;
+    while (elapsedTime < preLandingTime)
+    {
+        float t = elapsedTime / preLandingTime;
+        float vibrationIntensity = 0.01f * (1 - t); // Reducida la intensidad
+        transform.position += Random.insideUnitSphere * vibrationIntensity;
+        
+        // Escala suave
+        float scale = 1f + Mathf.Sin(t * 10f) * 0.03f;
+        transform.localScale = originalScale * scale;
+        
+        elapsedTime += Time.deltaTime;
+        yield return null;
+    }
+
+    if (animator != null)
+    {
+        animator.SetBool("isEnding", true);
+        animator.SetBool("isNothing", false);
+    }
+
+    // Phase 2: Dramatic descent
+    elapsedTime = 0f;
+    float rotationEndTime = landingDuration * 0.7f; // La rotación termina antes que el descenso
+    
+    while (elapsedTime < landingDuration)
+    {
+        float t = elapsedTime / landingDuration;
+        
+        // Curva de descenso suavizada
+        float heightProgress = 1 - Mathf.Pow(1 - t, 2); // Curva cuadrática para suavizar el final
+        Vector3 newPos = Vector3.Lerp(startPos, finalPos, heightProgress);
+        
+        // Rotación suave que termina antes que el descenso
+        if (elapsedTime < rotationEndTime)
+        {
+            float rotT = elapsedTime / rotationEndTime;
+            transform.rotation = Quaternion.Slerp(startRotation, targetRotation, rotT);
+        }
+        else
+        {
+            transform.rotation = targetRotation;
+        }
+        
+        // Reducir la escala gradualmente
+        float scaleT = Mathf.Clamp01(t * 1.5f); // Más rápido al principio
+        transform.localScale = Vector3.Lerp(originalScale, originalScale * 0.98f, scaleT);
+        
+        // Sway suave que se reduce con el tiempo
+        float sway = Mathf.Sin(t * Mathf.PI * 3) * 0.05f * (1 - t);
+        newPos += transform.right * sway;
+        
+        transform.position = newPos;
+        elapsedTime += Time.deltaTime;
+        yield return null;
+    }
+
+    // Asegurar posición y rotación finales
+    transform.position = finalPos;
+    transform.rotation = targetRotation;
+    transform.localScale = originalScale * 0.98f;
+    
+    if (rb != null)
+    {
+        rb.isKinematic = true;
+    }
+    
+    // Desactivar el NavMeshAgent y establecer estados finales
+    if (navAgent != null)
+    {
+        navAgent.enabled = false;
+    }
+    
+    hasInitializedTakeoff = false;
+    Debug.Log($"Drone {id} ha completado su secuencia de aterrizaje");
+}
 
     IEnumerator HoverInPlace()
     {
@@ -202,6 +377,14 @@ public class RobotAgent : MonoBehaviour
 
     IEnumerator PerformDramaticTakeoff()
     {
+
+        if (animator != null)
+        {
+            animator.SetBool("isStarted", true);
+            animator.SetBool("isEnding", false);
+            animator.SetBool("isNothing", true);
+        }
+
         // Efectos de "calentamiento" antes del despegue
         float warmupTime = 1.5f;
         float elapsedTime = 0f;

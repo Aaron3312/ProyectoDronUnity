@@ -70,7 +70,7 @@ public class RobotWorld : MonoBehaviour
         StartCoroutine(DecisionLoop());
     }
 
-
+ 
 
     WorldState GetCurrentWorldState()
     {
@@ -86,7 +86,7 @@ public class RobotWorld : MonoBehaviour
                     position = robot.transform.position,
                 }
             }); 
-            Debug.Log($"Agent {robot.id} state added to world state.");
+            // Debug.Log($"Agent {robot.id} state added to world state.");
             }
 
             // Logging for debugging
@@ -117,9 +117,10 @@ public class RobotWorld : MonoBehaviour
                 if (www.result == UnityWebRequest.Result.Success)
                 {
                     string responseText = www.downloadHandler.text;
-                    // Debug.Log($"Received response: {responseText}"); // Add logging for debugging
+                    Debug.Log($"Received response: {responseText}"); // Add logging for debugging
                     PythonResponse response = JsonUtility.FromJson<PythonResponse>(responseText);
                     ExecuteDecisions(response.decisions);
+
                 }
                 else
                 {
@@ -164,6 +165,17 @@ public class RobotWorld : MonoBehaviour
                         robot.MoveToTargetHuman(targetPosition);
                     }
                     break;
+                case "takeoff":
+                    robot.Takeoff();
+                    break;
+
+                case "land":
+                    robot.Land();
+                    break;
+
+                case "do_nothing_aterrizing":
+                    break;
+
                 case "wait":
                     robot.Wait();
                     break; 

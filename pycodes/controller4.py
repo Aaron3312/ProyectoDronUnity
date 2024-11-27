@@ -13,9 +13,15 @@ app = Flask(__name__)
 
 class DroneAgent(ap.Agent):
     """Individual drone agent with sensing and decision-making capabilities"""
-    
+
+
+
     def setup(self):
         # Agent state variables
+        self.security_socket = None
+        self.connect_to_security_server()
+
+        self.landing_commanded_executed = False
         self.position = {'x': 0, 'y': 0, 'z': 0}
         self.current_target = None
         self.last_target_time = 0
@@ -26,10 +32,23 @@ class DroneAgent(ap.Agent):
         self.exploring = False
         self.last_explore_time = 0
         self.explore_cooldown = 10.0
+        self.starting = True
         
+        self.landing_commanded = False
+
         # Detection timing
         self.last_detection_time = 0
         self.detection_cooldown = 3.0
+
+    def connect_to_security_server(self):
+        try:
+            self.security_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.security_socket.connect(('127.0.0.1', 5782))
+            self.security_socket.send("DRONE_AGENT".encode('utf-8'))
+            logger.info("Connected to security agent server")
+        except Exception as e:
+            logger.error(f"Could not connect to security agent: {e}")
+            self.security_socket = None
 
     def update_position(self, new_position):
         """Update the agent's position"""
@@ -39,6 +58,17 @@ class DroneAgent(ap.Agent):
         """Process incoming detection data"""
         if current_time - self.last_detection_time < self.detection_cooldown:
             return False
+
+        if 'confidence' in detection and detection['confidence'] > 0.9 and detection.get('type') == 'human':
+            # Enviar alerta al servidor de seguridad
+            if self.security_socket:
+                try:
+                    alert_msg = f"HUMAN_DETECTED:confidence={detection['confidence']}"
+                    self.security_socket.send(alert_msg.encode('utf-8'))
+                except Exception as e:
+                    logger.error(f"Error sending human detection alert: {e}")
+                    # Intentar reconectar si falla el envío
+                    self.connect_to_security_server()
 
         if 'confidence' in detection and detection['confidence'] > 0.8:
             if 'camera_id' in detection and camera_positions:
@@ -60,6 +90,33 @@ class DroneAgent(ap.Agent):
     def make_decision(self, current_time):
         """Determine next action based on current state"""
         # Check human detection timeout
+
+        if self.starting:
+            self.starting = False
+            logger.info("Starting")
+            return {
+                "decision": "takeoff",
+                "target": None
+            }
+
+        if self.landing_commanded:
+            self.landing_commanded_executed = True
+            self.landing_commanded = False
+            logger.info("Executing landing command")
+            return {
+                "decision": "land",
+                "target": None
+            }
+
+        if self.landing_commanded_executed:
+            logger.info("Landed or so, doing nothing")
+            return {
+                "decision": "do_nothing_aterrizing",
+                "target": None
+            }
+
+
+
         if self.wait_because_see_human:
             if (current_time - self.last_human_detection_time) >= self.human_detection_timeout:
                 logger.info("Human detection timeout reached, resuming normal operation")
@@ -122,9 +179,62 @@ class DroneModel(ap.Model):
         self.dron_detection_socket.bind(('0.0.0.0', 5557))
         self.dron_detection_socket.settimeout(1.0)
 
+        # New command socket for receiving landing commands
+        self.command_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.command_socket.bind(('0.0.0.0', 5782))
+        self.command_socket.listen(1)
+        self.command_socket.settimeout(1.0)
+
+        # Modificar la conexión al servidor de seguridad
+        self.security_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.security_socket.connect(('127.0.0.1', 5782))
+            # Identificarse como DroneAgent
+            self.security_socket.send("DRONE_AGENT".encode('utf-8'))
+            logger.info("Connected to security agent server")
+        except Exception as e:
+            logger.error(f"Could not connect to security agent: {e}")
+            self.security_socket = None
+
+
+
         # Start detection threads
         self.running = True
         self.start_detection_threads()
+        self.start_security_thread()
+
+
+    def start_security_thread(self):
+        """Start thread for receiving from security agent"""
+        self.security_thread = threading.Thread(target=self._handle_security_commands)
+        self.security_thread.daemon = True
+        self.security_thread.start()
+
+    def _handle_security_commands(self):
+        """Handle incoming commands from security agent"""
+        while self.running and self.security_socket:
+            try:
+                data = self.security_socket.recv(1024).decode('utf-8')
+                if not data:
+                    continue
+                
+                if data.strip() == "LAND":
+                    logger.info("Received landing command from security server")
+                    for agent in self.agents:
+                        agent.landing_commanded = True
+                
+            except Exception as e:
+                logger.error(f"Security command handling error: {e}")
+                # Try to reconnect
+                try:
+                    self.security_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.security_socket.connect(('127.0.0.1', 5782))
+                    # Re-identificarse como DroneAgent
+                    self.security_socket.send("DRONE_AGENT".encode('utf-8'))
+                    logger.info("Reconnected to security agent server")
+                except Exception as e:
+                    logger.error(f"Reconnection failed: {e}")
+                    time.sleep(5)
 
     def start_detection_threads(self):
         """Initialize and start detection handling threads"""
@@ -177,6 +287,8 @@ class DroneModel(ap.Model):
         self.running = False
         self.detection_socket.close()
         self.dron_detection_socket.close()
+        if self.security_socket:
+            self.security_socket.close()
 
 # Global model instance
 drone_model = DroneModel({'n_drones': 1})
