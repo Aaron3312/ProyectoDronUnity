@@ -38,29 +38,38 @@ Potential threats that the security system must detect and respond to.
 - Python 3.8+
 - Required Python packages:
   ```bash
-  pip install agentpy numpy opencv-python
+  pip install agentpy numpy opencv-python flask socket threading json logging
   ```
 
 ## 🚀 Installation & Setup
 
-1. Clone the repository:
+1. Download and Extract Project:
+   - Download the project from [Google Drive](https://drive.google.com/drive/folders/1DxrSCH2N2o1mYsjl2kHfD6g_rXp5eCir?usp=sharing)
+   - Extract the downloaded ZIP file to your desired location
+
+2. Clone the repository (if you prefer using Git):
    ```bash
    git clone https://github.com/Aaron3312/ProyectoDronUnity.git
    ```
 
-2. Open the project in Unity:
+3. Open the project in Unity:
    - Launch Unity Hub
-   - Add the project from the cloned directory
+   - Add the project from the extracted directory
    - Open the project
 
-3. Navigate to the Python scripts location:
+4. Navigate to the Python scripts location:
    ```bash
    cd Assets/pycodes
    ```
 
+5. Install Required Python Dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
 ## 💻 Running the System
 
-1. First, start the Python agents:
+1. First, start the Python agents in separate terminals:
    ```bash
    python CameraController.py
    python controller4.py
