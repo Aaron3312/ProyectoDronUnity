@@ -13,7 +13,7 @@ This system simulates a prison security environment where:
 ## 🖼️ Environment & Agents
 
 ### Virtual Environment
-![Dungeon Environment](images/dungeon.png)
+![Dungeon Environment](images/Dungeon.png)
 A dark-themed prison environment with UV-mapped textures, creating an atmospheric and challenging surveillance scenario.
 
 ### Security Drone
