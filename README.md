@@ -14,22 +14,27 @@ This system simulates a prison security environment where:
 
 ### Virtual Environment
 ![Dungeon Environment](Images/Dungeon.png)
+
 A dark-themed prison environment with UV-mapped textures, creating an atmospheric and challenging surveillance scenario.
 
 ### Security Drone
 ![Security Drone](Images/Dron.png)
+
 Autonomous drone that performs aerial patrols and responds to security alerts in real-time.
 
 ### Security Guard
 ![Security Guard](Images/SecurityGuard.png)
+
 Skeletal security personnel that monitors the surveillance system and can take manual control of the drone when needed.
 
 ### Security Cameras
 ![Security Cameras](Images/SecurityCams.png)
+
 Fixed surveillance cameras that monitor designated areas and detect suspicious activities.
 
 ### Intruder
 ![Intruder](Images/Ladron.png)
+
 Potential threats that the security system must detect and respond to.
 
 ## 🛠️ Prerequisites
