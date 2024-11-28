@@ -1,4 +1,4 @@
-# Prison Security Multi-Agent System
+# Security Multi-Agent System
 
 A multi-agent simulation system developed in Unity and Python that models interactions between autonomous drones, security cameras, and security personnel in a prison environment. This project was developed by Team Warlocks at Tecnológico de Monterrey.
 
