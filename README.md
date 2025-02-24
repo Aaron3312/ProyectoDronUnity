@@ -98,11 +98,6 @@ Potential threats that the security system must detect and respond to.
 
 ## 👥 Contributors
 - Aarón Hernández Jiménez (ITC | A01642529)
-- Christian Fernando Aguilera Santos (ITC | A01643407)
-- Maxime Parienté (ITC | A01764161)
-- Pablo Esteban Reyes (ITC | A01643307)
-- Luis Marco Barriga Baez (ITC | A01643954)
-- Aram Barsegyan (ITC | A01642781)
 
 ## 📝 License
 This project is part of the TC2008B course at Tecnológico de Monterrey, Campus Guadalajara.
